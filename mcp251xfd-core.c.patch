@@ -1,0 +1,462 @@
+--- /home/szbaijie/acho/mcp251xfd/mcp251xfd/mcp251xfd-core.c	2022-09-29 13:49:11.643132295 +0300
++++ /home/szbaijie/workspace/a133/longan2/kernel/linux-4.9/drivers/net/can/spi/mcp251xfd_15sep/mcp251xfd-core.c	2022-09-15 15:56:45.007843912 +0300
+@@ -38,6 +38,35 @@
+ #endif
+ // by Dv: compatibility /
+ 
++
++/*
++ * T&D added
++ * {
++ */
++
++
++#define TID_CAN_CLK  40000000
++#define TID_SPI_FREQ 4000000
++//#define MY_REGMAP
++
++// marker2
++
++
++
++static int
++mcp251xfd_chip_wait_for_osc_ready(const struct mcp251xfd_priv *priv, u32 osc_reference, u32 osc_mask);
++
++static const char *
++mcp251xfd_get_osc_str(const u32 osc, const u32 osc_reference);
++
++static inline bool mcp251xfd_reg_invalid(u32 reg);
++
++
++
++/*
++ * }
++ */
++
+ static const struct mcp251xfd_devtype_data mcp251xfd_devtype_data_mcp2517fd = {
+ 	.quirks = MCP251XFD_QUIRK_MAB_NO_WARN | MCP251XFD_QUIRK_CRC_REG |
+ 		MCP251XFD_QUIRK_CRC_RX | MCP251XFD_QUIRK_CRC_TX |
+@@ -322,7 +351,8 @@
+ 	xfer->tx_buf = &tx_obj->buf;
+ 	xfer->len = 0;	/* actual len is assigned on the fly */
+ 	xfer->cs_change = 1;
+-// by Dv: compatibility
++	
++/*
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0))
+ 	xfer->cs_change_delay.value = 0;
+ 	xfer->cs_change_delay.unit = SPI_DELAY_UNIT_NSECS;
+@@ -330,7 +360,10 @@
+ 	xfer->cs_change_delay = 0;
+ 	xfer->cs_change_delay_unit = SPI_DELAY_UNIT_NSECS;
+ #endif
+-// by Dv: compatibility /
++
++TODO, NE_E_VAJNO
++
++*/
+ 
+ 	/* FIFO request to send */
+ 	xfer = &tx_obj->xfer[1];
+@@ -371,7 +404,7 @@
+ 		xfer->tx_buf = &tef_ring->uinc_buf;
+ 		xfer->len = len;
+ 		xfer->cs_change = 1;
+-// by Dv: compatibility
++/*
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0))
+ 		xfer->cs_change_delay.value = 0;
+ 		xfer->cs_change_delay.unit = SPI_DELAY_UNIT_NSECS;
+@@ -379,7 +412,10 @@
+ 		xfer->cs_change_delay = 0;
+ 		xfer->cs_change_delay_unit = SPI_DELAY_UNIT_NSECS;
+ #endif
+-// by Dv: compatibility /
++
++TODO, NE E VAJNO
++
++*/
+ 	}
+ 
+ 	/* TX */
+@@ -428,7 +464,7 @@
+ 			xfer->tx_buf = &rx_ring->uinc_buf;
+ 			xfer->len = len;
+ 			xfer->cs_change = 1;
+-// by Dv: compatibility
++/*
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0))
+ 			xfer->cs_change_delay.value = 0;
+ 			xfer->cs_change_delay.unit = SPI_DELAY_UNIT_NSECS;
+@@ -436,7 +472,10 @@
+ 			xfer->cs_change_delay = 0;
+ 			xfer->cs_change_delay_unit = SPI_DELAY_UNIT_NSECS;
+ #endif
+-// by Dv: compatibility /
++
++TODO, NE SE IZPOLZVA
++
++*/
+ 		}
+ 	}
+ }
+@@ -542,25 +581,34 @@
+ 	u32 con, con_reqop;
+ 	int err;
+ 
++
+ // by Dv: noslp
+-if ( priv->dv_noslp && mode_req == MCP251XFD_REG_CON_MODE_SLEEP) return( 0);
++	if(priv->dv_noslp && mode_req == MCP251XFD_REG_CON_MODE_SLEEP)
++		return 0;
++	
+ 	con_reqop = FIELD_PREP(MCP251XFD_REG_CON_REQOP_MASK, mode_req);
+-	err = regmap_update_bits(priv->map_reg, MCP251XFD_REG_CON,
+-				 MCP251XFD_REG_CON_REQOP_MASK, con_reqop);
+-	if (err)
++	printk(KERN_NOTICE "con_reqop=%u\n", con_reqop);
++	printk(KERN_NOTICE "mask=%u\n", MCP251XFD_REG_CON_REQOP_MASK);
++	err = regmap_update_bits(priv->map_reg, MCP251XFD_REG_CON, MCP251XFD_REG_CON_REQOP_MASK, con_reqop);
++	if(err)
++	{
++		netdev_err(priv->ndev, "set_mode_up_bits_ret=%d\n", err);
+ 		return err;
+-
++	}
+ // by Dv: dbg
+ netdev_err(priv->ndev, "sleep?:%d\n", ( mode_req == MCP251XFD_REG_CON_MODE_SLEEP));
+ 	if (mode_req == MCP251XFD_REG_CON_MODE_SLEEP || nowait)
+ 		return 0;
+ 
+ 	err = regmap_read_poll_timeout(priv->map_reg, MCP251XFD_REG_CON, con,
+-				       FIELD_GET(MCP251XFD_REG_CON_OPMOD_MASK,
+-						 con) == mode_req,
++				       FIELD_GET(MCP251XFD_REG_CON_OPMOD_MASK, con) == mode_req,
+ 				       MCP251XFD_POLL_SLEEP_US,
+-				       MCP251XFD_POLL_TIMEOUT_US);
+-	if (err) {
++					   500000);
++				       //MCP251XFD_POLL_TIMEOUT_US);
++
++	printk(KERN_NOTICE "mode_bits=%x\nreqmode_mask=%x\ncon=%x\n",MCP251XFD_REG_CON_OPMOD_MASK,con_reqop,con);
++	if(err)
++	{
+ 		u8 mode = FIELD_GET(MCP251XFD_REG_CON_OPMOD_MASK, con);
+ 
+ 		netdev_err(priv->ndev,
+@@ -592,6 +640,9 @@
+ 	return reg == 0x0 || reg == 0xffffffff;
+ }
+ 
++/* marker1 */
++/* marker1 */
++
+ static int mcp251xfd_chip_clock_enable(const struct mcp251xfd_priv *priv)
+ {
+ 	u32 osc, osc_reference, osc_mask;
+@@ -600,10 +651,15 @@
+ 	/* Set Power On Defaults for "Clock Output Divisor" and remove
+ 	 * "Oscillator Disable" bit.
+ 	 */
+-	osc = FIELD_PREP(MCP251XFD_REG_OSC_CLKODIV_MASK,
+-			 MCP251XFD_REG_OSC_CLKODIV_10);
++	printk (KERN_NOTICE "mask=0x%08x; clkdiv10=0x%08x;\n",MCP251XFD_REG_OSC_CLKODIV_MASK,MCP251XFD_REG_OSC_CLKODIV_10);
++	osc = FIELD_PREP(MCP251XFD_REG_OSC_CLKODIV_MASK, MCP251XFD_REG_OSC_CLKODIV_10);
++
++	printk(KERN_NOTICE "debug_size_nocrc=%u\n", sizeof_field(struct mcp251xfd_map_buf_nocrc, data));
++	printk(KERN_NOTICE "debug_size_crc=%u\n", sizeof_field(struct mcp251xfd_map_buf_crc, data));
++	
+ 	osc_reference = MCP251XFD_REG_OSC_OSCRDY;
+-	osc_mask = MCP251XFD_REG_OSC_OSCRDY | MCP251XFD_REG_OSC_PLLRDY;
++	osc_mask = MCP251XFD_REG_OSC_OSCRDY;
++	//osc_mask = MCP251XFD_REG_OSC_OSCRDY | MCP251XFD_REG_OSC_PLLRDY;
+ 
+ 	/* Note:
+ 	 *
+@@ -611,19 +667,31 @@
+ 	 * removes the "Oscillator Disable" bit and powers it up. All
+ 	 * other bits are unaffected.
+ 	 */
++	 
++	
++	tid_cs_start(priv->spi);
++	//
+ 	err = regmap_write(priv->map_reg, MCP251XFD_REG_OSC, osc);
+-// by Dv: dbg
+-netdev_err( priv->ndev, "%s(%d) w1 osc=0x%08x\n", __FUNCTION__, __LINE__, osc);
++	//
++	tid_cs_stop(priv->spi);
++	
++	netdev_err( priv->ndev, "%s(%d) w1 osc=0x%08x\n", __FUNCTION__, __LINE__, osc);
++
+ 	if (err)
+ 		return err;
++		
++	//return mcp251xfd_chip_wait_for_osc_ready(priv, osc_reference, osc_mask);
+ 
+ 	/* Wait for "Oscillator Ready" bit */
+-	err = regmap_read_poll_timeout(priv->map_reg, MCP251XFD_REG_OSC, osc,
+-				       (osc & osc_mask) == osc_reference,
+-				       MCP251XFD_OSC_STAB_SLEEP_US,
++	err = regmap_read_poll_timeout(priv->map_reg, MCP251XFD_REG_OSC, osc, (osc & osc_mask) == osc_reference, MCP251XFD_OSC_STAB_SLEEP_US,
+ 				       MCP251XFD_OSC_STAB_TIMEOUT_US);
+-// by Dv: dbg
+-netdev_err( priv->ndev, "%s(%d) r0 osc=0x%08x\n", __FUNCTION__, __LINE__, osc);
++				       
++	//tid_cs_start(priv->spi);
++	//while(1);
++
++	netdev_err( priv->ndev, "%s(%d) r0 osc=0x%08x\n", __FUNCTION__, __LINE__, osc);
++
++
+ 	if (mcp251xfd_osc_invalid(osc)) {
+ 		netdev_err(priv->ndev,
+ 			   "Failed to detect %s (osc=0x%08x).\n",
+@@ -726,8 +794,44 @@
+ 	return err;
+ }
+ 
++static int
++mcp251xfd_chip_wait_for_osc_ready(const struct mcp251xfd_priv *priv, u32 osc_reference, u32 osc_mask)
++{
++	u32 osc;
++	int err;
++
++	err = regmap_read_poll_timeout(priv->map_reg, MCP251XFD_REG_OSC, osc,
++				       !mcp251xfd_reg_invalid(osc) &&
++				       (osc & osc_mask) == osc_reference,
++				       MCP251XFD_OSC_STAB_SLEEP_US,
++				       MCP251XFD_OSC_STAB_TIMEOUT_US);
++	if (err != -ETIMEDOUT)
++		return err;
++
++	if (mcp251xfd_reg_invalid(osc)) {
++		netdev_err(priv->ndev,
++			   "Failed to read Oscillator Configuration Register (osc=0x%08x).\n",
++			   osc);
++		return -ENODEV;
++	}
++
++	netdev_err(priv->ndev,
++		   "Timeout waiting for %s ready (osc=0x%08x, osc_reference=0x%08x, osc_mask=0x%08x).\n",
++		   mcp251xfd_get_osc_str(osc, osc_reference),
++		   osc, osc_reference, osc_mask);
++
++	return -ETIMEDOUT;
++}
++
++static inline bool mcp251xfd_reg_invalid(u32 reg)
++{
++	return reg == 0x0 || reg == 0xffffffff;
++}
++
+ static int mcp251xfd_chip_clock_init(const struct mcp251xfd_priv *priv)
+ {
++	printk (KERN_NOTICE "mcp251xfd_chip_clock_init\n");
++	
+ 	u32 osc;
+ 	int err;
+ 
+@@ -738,10 +842,17 @@
+ 	osc = MCP251XFD_REG_OSC_LPMEN |
+ 		FIELD_PREP(MCP251XFD_REG_OSC_CLKODIV_MASK,
+ 			   MCP251XFD_REG_OSC_CLKODIV_10);
+-// by Dv: osc, dbg
++
+ netdev_err( priv->ndev, "%s(%d) w0 osc=0x%08x\n", __FUNCTION__, __LINE__, osc);
+-if ( priv->dv_oscva != ( 0x01 << 31)) osc = priv->dv_oscva;
++
++	if(priv->dv_oscva != ( 0x01 << 31))
++	{
++		osc = priv->dv_oscva;
++		netdev_err( priv->ndev, "%s(%d) osc setted to dv_oscva => 0x%08x\n", __FUNCTION__, __LINE__, osc);
++	}
++
+ 	err = regmap_write(priv->map_reg, MCP251XFD_REG_OSC, osc);
++	
+ netdev_err( priv->ndev, "%s(%d) w1 osc=0x%08x\n", __FUNCTION__, __LINE__, osc);
+ 	if (err)
+ 		return err;
+@@ -755,6 +866,22 @@
+ 			    MCP251XFD_REG_TSCON_TBCEN);
+ }
+ 
++static const char *
++mcp251xfd_get_osc_str(const u32 osc, const u32 osc_reference)
++{
++	switch (~osc & osc_reference &
++		(MCP251XFD_REG_OSC_OSCRDY | MCP251XFD_REG_OSC_PLLRDY)) {
++	case MCP251XFD_REG_OSC_PLLRDY:
++		return "PLL";
++	case MCP251XFD_REG_OSC_OSCRDY:
++		return "Oscillator";
++	case MCP251XFD_REG_OSC_PLLRDY | MCP251XFD_REG_OSC_OSCRDY:
++		return "Oscillator/PLL";
++	}
++
++	return "<unknown>";
++}
++
+ static int mcp251xfd_set_bittiming(const struct mcp251xfd_priv *priv)
+ {
+ 	const struct can_bittiming *bt = &priv->can.bittiming;
+@@ -1004,7 +1131,7 @@
+ 
+ 	err = regmap_raw_write(priv->map_reg, MCP251XFD_RAM_START, ram,
+ 			       MCP251XFD_RAM_SIZE);
+-	kfree(ram);
++	//kfree(ram);
+ 
+ 	return err;
+ }
+@@ -2602,9 +2729,9 @@
+ mcp251xfd_register_quirks(struct mcp251xfd_priv *priv)
+ {
+ 	const struct spi_device *spi = priv->spi;
+-	const struct spi_controller *ctlr = spi->controller;
++	const struct spi_master *mas = spi->master;
+ 
+-	if (ctlr->flags & SPI_CONTROLLER_HALF_DUPLEX)
++	if (mas->flags & SPI_MASTER_HALF_DUPLEX)
+ 		priv->devtype_data.quirks |= MCP251XFD_QUIRK_HALF_DUPLEX;
+ }
+ 
+@@ -2712,7 +2839,9 @@
+ 		goto out_kfree_buf_tx;
+ 
+ 	*dev_id = be32_to_cpup((__be32 *)buf_rx->data);
+-	*effective_speed_hz = xfer->effective_speed_hz;
++	//*effective_speed_hz = xfer->effective_speed_hz;
++	// TODO
++	// TVA E SAMO ZA PRINTVANETO NA MHZ S NETDEV_INFO
+ 
+  out_kfree_buf_tx:
+ 	kfree(buf_tx);
+@@ -2877,8 +3006,10 @@
+  return( 1);  }
+ // by Dv compatibility /
+ 
++
++
+ static int mcp251xfd_probe(struct spi_device *spi)
+-{
++{	
+ 	const void *match;
+ 	struct net_device *ndev;
+ 	struct mcp251xfd_priv *priv;
+@@ -2901,13 +3032,17 @@
+ #endif
+ // by Dv: compatibility /
+ // by Dv: iocon, oscva, nober, noslp
+-	struct device_node *np = spi->dev.of_node;
++	struct device_node *np;
++	np = spi->dev.of_node; // CHECK IF NOT WORKS
+ 	u32 dviocon, dvoscva;
+ 	bool dvnober = false, dvnoslp = false;
++	
+ 	of_property_read_u32( np, "dv_iocon", &( dviocon));
+ 	of_property_read_u32( np, "dv_oscva", &( dvoscva));
++	
+ 	dvnober = of_property_read_bool( np, "dv_nober");
+ 	dvnoslp = of_property_read_bool( np, "dv_noslp");
++	dvnoslp = true;
+ // by Dv: iocon, oscva, nober, noslp /
+ 
+ 	rx_int = devm_gpiod_get_optional(&spi->dev, "microchip,rx-int",
+@@ -2938,7 +3073,14 @@
+ 		dev_err(&spi->dev, "No Oscillator (clock) defined.\n");
+ 		return PTR_ERR(clk);
+ 	}
++
++#ifndef TID_CAN_CLK
+ 	freq = clk_get_rate(clk);
++#else
++	freq = TID_CAN_CLK;
++#endif
++
++	printk(KERN_NOTICE "my_freq=%u\n",freq);
+ 
+ 	/* Sanity check */
+ // by Dv: freq
+@@ -2992,12 +3134,18 @@
+ 	priv->reg_vdd = reg_vdd;
+ 	priv->reg_xceiver = reg_xceiver;
+ 
+-	match = device_get_match_data(&spi->dev);
++	
++	// CHECK
++	match = of_device_get_match_data(&spi->dev);
+ 	if (match)
+ 		priv->devtype_data = *(struct mcp251xfd_devtype_data *)match;
+ 	else
+ 		priv->devtype_data = *(struct mcp251xfd_devtype_data *)
+ 			spi_get_device_id(spi)->driver_data;
++	//
++	// or
++	//priv->devtype_data = *(struct mcp251xfd_devtype_data *)
++	//		spi_get_device_id(spi)->driver_data;
+ 
+ 	/* Errata Reference:
+ 	 * mcp2517fd: DS80000789B, mcp2518fd: DS80000792C 4.
+@@ -3028,9 +3176,18 @@
+ 	 *
+ 	 */
+ 	priv->spi_max_speed_hz_orig = spi->max_speed_hz;
++	
++#ifndef TID_SPI_FREQ
+ 	spi->max_speed_hz = min(spi->max_speed_hz, freq / 2 / 1000 * 850);
++#else
++	spi->max_speed_hz = min(TID_SPI_FREQ, freq / 2 / 1000 * 850);
++#endif
++	
+ 	spi->bits_per_word = 8;
+-	spi->rt = true;
++	//spi->rt = true;
++	// GUBIM REAL TIME-A
++	// CHECK IF NOT WORKS
++	
+ // by Dv: dbg
+ dev_err( &spi->dev, "%s():%d spi-> max_speed_hz:%d \n", __FUNCTION__, __LINE__, spi->max_speed_hz);
+ 	err = spi_setup(spi);
+@@ -3039,13 +3196,17 @@
+ 	if (err)
+ 		goto out_free_candev;
+ 
++	//vikam_te(spi);
++	//err=-ENODEV;
++	//goto out_free_candev;
++
+ 	err = mcp251xfd_regmap_init(priv);
+ // by Dv: dbg
+ dev_err( &spi->dev, "%s():%d spi_setup:%d \n", __FUNCTION__, __LINE__, err);
+ 	if (err)
+ 		goto out_free_candev;
+ 
+-// by Dv: compatibility
++/*
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0))
+ 	err = can_rx_offload_add_manual(ndev, &priv->offload,
+ 					MCP251XFD_NAPI_WEIGHT);
+@@ -3053,7 +3214,13 @@
+ 	priv->offload.mailbox_read = mcp251xfd_mailbox_read;
+ 	err = can_rx_offload_add_fifo(ndev, &priv->offload, MCP251XFD_NAPI_WEIGHT);
+ #endif
+-// by Dv: compatibility /
++*/
++
++	//TODO
++
++	priv->offload.mailbox_read = mcp251xfd_mailbox_read;
++	err = can_rx_offload_add_fifo(ndev, &priv->offload, MCP251XFD_NAPI_WEIGHT);
++
+ 	if (err)
+ 		goto out_free_candev;
+ 
+@@ -3117,6 +3284,6 @@
+ };
+ module_spi_driver(mcp251xfd_driver);
+ 
+-MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de>");
++MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de> --- Edited by Acho @ T&D Engineering");
+ MODULE_DESCRIPTION("Microchip MCP251xFD Family CAN controller driver");
+ MODULE_LICENSE("GPL v2");

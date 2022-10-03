@@ -1,0 +1,9 @@
+--- /home/szbaijie/workspace/a133_new/longan/kernel/linux-4.9/drivers/net/can/spi/Makefile	2021-07-01 05:37:12.000000000 +0300
++++ /home/szbaijie/workspace/a133/longan2/kernel/linux-4.9/drivers/net/can/spi/Makefile	2022-08-25 09:54:58.958735062 +0300
+@@ -2,5 +2,5 @@
+ #  Makefile for the Linux Controller Area Network SPI drivers.
+ #
+ 
+-
++obj-$(CONFIG_CAN_MCP251XFD) += mcp251xfd/
+ obj-$(CONFIG_CAN_MCP251X)	+= mcp251x.o

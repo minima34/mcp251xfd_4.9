@@ -1,0 +1,80 @@
+--- mcp251xfd-regmap.c	2022-09-29 13:49:11.643132295 +0300
++++ mcp251xfd-regmap.patched.c	2022-09-30 10:15:01.752620311 +0300
+@@ -10,6 +10,46 @@
+ 
+ #include <asm/unaligned.h>
+ 
++//TID
++//ACHO
++static void devm_regmap_release(struct device *dev, void *res)
++{
++	regmap_exit(*(struct regmap **)res);
++}
++
++struct regmap *__my_devm_regmap_init(struct device *dev,
++				  const struct regmap_bus *bus,
++				  void *bus_context,
++				  const struct regmap_config *config,
++				  struct lock_class_key *lock_key,
++				  const char *lock_name)
++{
++	struct regmap **ptr, *regmap;
++
++	ptr = devres_alloc(devm_regmap_release, sizeof(*ptr), GFP_KERNEL);
++	if (!ptr)
++		return ERR_PTR(-ENOMEM);
++
++	regmap = __regmap_init(dev, bus, bus_context, config,
++			       lock_key, lock_name);
++	if (!IS_ERR(regmap)) {
++		*ptr = regmap;
++		devres_add(dev, ptr);
++	} else {
++		devres_free(ptr);
++	}
++
++	return regmap;
++}
++
++#define __my_regmap_lockdep_wrapper(fn, name, ...) fn(__VA_ARGS__, NULL, NULL)
++
++#define my_devm_regmap_init(dev, bus, bus_context, config)			\
++	__my_regmap_lockdep_wrapper(__my_devm_regmap_init, #config,		\
++				dev, bus, bus_context, config)
++//TID
++//ACHO
++
+ static const struct regmap_config mcp251xfd_regmap_crc;
+ 
+ static int
+@@ -310,6 +350,12 @@
+ 
+ 	for (i = 0; i < MCP251XFD_READ_CRC_RETRIES_MAX; i++) {
+ 		err = mcp251xfd_regmap_crc_read_one(priv, &msg, val_len);
++
++		if(err == -EBADMSG)
++		{
++			printk(KERN_NOTICE "crc problem\n");
++		}
++
+ 		if (!err)
+ 			goto out;
+ 		if (err != -EBADMSG)
+@@ -439,7 +485,7 @@
+ 	if (!priv->map_nocrc) {
+ 		struct regmap *map;
+ 
+-		map = devm_regmap_init(&priv->spi->dev, &mcp251xfd_bus_nocrc,
++		map = my_devm_regmap_init(&priv->spi->dev, &mcp251xfd_bus_nocrc,
+ 				       priv->spi, &mcp251xfd_regmap_nocrc);
+ 		if (IS_ERR(map))
+ 			return PTR_ERR(map);
+@@ -492,7 +538,7 @@
+ 	if (!priv->map_crc) {
+ 		struct regmap *map;
+ 
+-		map = devm_regmap_init(&priv->spi->dev, &mcp251xfd_bus_crc,
++		map = my_devm_regmap_init(&priv->spi->dev, &mcp251xfd_bus_crc,
+ 				       priv->spi, &mcp251xfd_regmap_crc);
+ 		if (IS_ERR(map))
+ 			return PTR_ERR(map);

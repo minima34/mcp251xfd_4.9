@@ -1,0 +1,179 @@
+--- mcp251xfd-core.c	2022-09-29 13:49:11.643132295 +0300
++++ mcp251xfd-core.patched.c	2022-09-30 09:54:47.644455859 +0300
+@@ -30,6 +30,18 @@
+ 
+ #define DEVICE_NAME "mcp251xfd"
+ 
++/*
++ * T&D added
++ * {
++ */
++
++//#define TID_CAN_CLK  40000000
++//#define TID_SPI_FREQ 4000000
++
++/*
++ * }
++ */
++
+ // by Dv: compatibility
+ #if (LINUX_VERSION_CODE < KERNEL_VERSION(5,11,0))
+ #define can_cc_dlc2len(dlc)	(min_t(u8, (dlc), CAN_MAX_DLEN))
+@@ -322,7 +334,9 @@
+ 	xfer->tx_buf = &tx_obj->buf;
+ 	xfer->len = 0;	/* actual len is assigned on the fly */
+ 	xfer->cs_change = 1;
++
+ // by Dv: compatibility
++/*
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0))
+ 	xfer->cs_change_delay.value = 0;
+ 	xfer->cs_change_delay.unit = SPI_DELAY_UNIT_NSECS;
+@@ -330,6 +344,7 @@
+ 	xfer->cs_change_delay = 0;
+ 	xfer->cs_change_delay_unit = SPI_DELAY_UNIT_NSECS;
+ #endif
++*/
+ // by Dv: compatibility /
+ 
+ 	/* FIFO request to send */
+@@ -372,6 +387,7 @@
+ 		xfer->len = len;
+ 		xfer->cs_change = 1;
+ // by Dv: compatibility
++/*
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0))
+ 		xfer->cs_change_delay.value = 0;
+ 		xfer->cs_change_delay.unit = SPI_DELAY_UNIT_NSECS;
+@@ -379,6 +395,7 @@
+ 		xfer->cs_change_delay = 0;
+ 		xfer->cs_change_delay_unit = SPI_DELAY_UNIT_NSECS;
+ #endif
++*/
+ // by Dv: compatibility /
+ 	}
+ 
+@@ -429,6 +446,7 @@
+ 			xfer->len = len;
+ 			xfer->cs_change = 1;
+ // by Dv: compatibility
++/*
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,5,0))
+ 			xfer->cs_change_delay.value = 0;
+ 			xfer->cs_change_delay.unit = SPI_DELAY_UNIT_NSECS;
+@@ -436,6 +454,7 @@
+ 			xfer->cs_change_delay = 0;
+ 			xfer->cs_change_delay_unit = SPI_DELAY_UNIT_NSECS;
+ #endif
++*/
+ // by Dv: compatibility /
+ 		}
+ 	}
+@@ -740,7 +759,13 @@
+ 			   MCP251XFD_REG_OSC_CLKODIV_10);
+ // by Dv: osc, dbg
+ netdev_err( priv->ndev, "%s(%d) w0 osc=0x%08x\n", __FUNCTION__, __LINE__, osc);
+-if ( priv->dv_oscva != ( 0x01 << 31)) osc = priv->dv_oscva;
++
++    if(priv->dv_oscva != ( 0x01 << 31))
++    {
++        osc = priv->dv_oscva;
++        netdev_err( priv->ndev, "%s(%d) osc setted to dv_oscva => 0x%08x\n", __FUNCTION__, __LINE__, osc);
++    }
++
+ 	err = regmap_write(priv->map_reg, MCP251XFD_REG_OSC, osc);
+ netdev_err( priv->ndev, "%s(%d) w1 osc=0x%08x\n", __FUNCTION__, __LINE__, osc);
+ 	if (err)
+@@ -2602,9 +2627,9 @@
+ mcp251xfd_register_quirks(struct mcp251xfd_priv *priv)
+ {
+ 	const struct spi_device *spi = priv->spi;
+-	const struct spi_controller *ctlr = spi->controller;
++	const struct spi_master *mas = spi->master;
+ 
+-	if (ctlr->flags & SPI_CONTROLLER_HALF_DUPLEX)
++	if (mas->flags & SPI_MASTER_HALF_DUPLEX)
+ 		priv->devtype_data.quirks |= MCP251XFD_QUIRK_HALF_DUPLEX;
+ }
+ 
+@@ -2712,7 +2737,8 @@
+ 		goto out_kfree_buf_tx;
+ 
+ 	*dev_id = be32_to_cpup((__be32 *)buf_rx->data);
+-	*effective_speed_hz = xfer->effective_speed_hz;
++	//*effective_speed_hz = xfer->effective_speed_hz;
++	//TVA E SAMO ZA PRINTVANETO NA MHZ S NETDEV_INFO
+ 
+  out_kfree_buf_tx:
+ 	kfree(buf_tx);
+@@ -2938,7 +2964,11 @@
+ 		dev_err(&spi->dev, "No Oscillator (clock) defined.\n");
+ 		return PTR_ERR(clk);
+ 	}
++#ifndef TID_CAN_CLK
+ 	freq = clk_get_rate(clk);
++#else
++    freq = TID_CAN_CLK;
++#endif
+ 
+ 	/* Sanity check */
+ // by Dv: freq
+@@ -2992,7 +3022,7 @@
+ 	priv->reg_vdd = reg_vdd;
+ 	priv->reg_xceiver = reg_xceiver;
+ 
+-	match = device_get_match_data(&spi->dev);
++	match = of_device_get_match_data(&spi->dev);
+ 	if (match)
+ 		priv->devtype_data = *(struct mcp251xfd_devtype_data *)match;
+ 	else
+@@ -3028,9 +3058,17 @@
+ 	 *
+ 	 */
+ 	priv->spi_max_speed_hz_orig = spi->max_speed_hz;
+-	spi->max_speed_hz = min(spi->max_speed_hz, freq / 2 / 1000 * 850);
++
++#ifndef TID_SPI_FREQ
++    spi->max_speed_hz = min(spi->max_speed_hz, freq / 2 / 1000 * 850);
++#else
++    spi->max_speed_hz = min(TID_SPI_FREQ, freq / 2 / 1000 * 850);
++#endif
++
+ 	spi->bits_per_word = 8;
+-	spi->rt = true;
++	//spi->rt = true;
++	//lose realtime
++
+ // by Dv: dbg
+ dev_err( &spi->dev, "%s():%d spi-> max_speed_hz:%d \n", __FUNCTION__, __LINE__, spi->max_speed_hz);
+ 	err = spi_setup(spi);
+@@ -3046,6 +3084,7 @@
+ 		goto out_free_candev;
+ 
+ // by Dv: compatibility
++/*
+ #if (LINUX_VERSION_CODE >= KERNEL_VERSION(5,10,0))
+ 	err = can_rx_offload_add_manual(ndev, &priv->offload,
+ 					MCP251XFD_NAPI_WEIGHT);
+@@ -3053,7 +3092,13 @@
+ 	priv->offload.mailbox_read = mcp251xfd_mailbox_read;
+ 	err = can_rx_offload_add_fifo(ndev, &priv->offload, MCP251XFD_NAPI_WEIGHT);
+ #endif
++*/
+ // by Dv: compatibility /
++
++	//old kernels only < 5.10
++	priv->offload.mailbox_read = mcp251xfd_mailbox_read;
++	err = can_rx_offload_add_fifo(ndev, &priv->offload, MCP251XFD_NAPI_WEIGHT);
++
+ 	if (err)
+ 		goto out_free_candev;
+ 
+@@ -3117,6 +3162,6 @@
+ };
+ module_spi_driver(mcp251xfd_driver);
+ 
+-MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de>");
++MODULE_AUTHOR("Marc Kleine-Budde <mkl@pengutronix.de> -- Ported to 4.9.170 by Acho at T&D Engineering");
+ MODULE_DESCRIPTION("Microchip MCP251xFD Family CAN controller driver");
+ MODULE_LICENSE("GPL v2");

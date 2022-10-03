@@ -1,0 +1,299 @@
+--- /home/szbaijie/acho/mcp251xfd/mcp251xfd/mcp251xfd-regmap.c	2022-09-29 13:49:11.643132295 +0300
++++ /home/szbaijie/workspace/a133/longan2/kernel/linux-4.9/drivers/net/can/spi/mcp251xfd_15sep/mcp251xfd-regmap.c	2022-09-15 13:38:50.466863713 +0300
+@@ -7,20 +7,75 @@
+ //
+ 
+ #include "mcp251xfd.h"
++#include <linux/platform_device.h>
+ 
+ #include <asm/unaligned.h>
+ 
++#include <linux/debugfs.h>
++
++static void devm_regmap_release(struct device *dev, void *res)
++{
++	regmap_exit(*(struct regmap **)res);
++}
++
++struct regmap *__my_devm_regmap_init(struct device *dev,
++				  const struct regmap_bus *bus,
++				  void *bus_context,
++				  const struct regmap_config *config,
++				  struct lock_class_key *lock_key,
++				  const char *lock_name)
++{
++	struct regmap **ptr, *regmap;
++
++	ptr = devres_alloc(devm_regmap_release, sizeof(*ptr), GFP_KERNEL);
++	if (!ptr)
++		return ERR_PTR(-ENOMEM);
++
++	regmap = __regmap_init(dev, bus, bus_context, config,
++			       lock_key, lock_name);
++	if (!IS_ERR(regmap)) {
++		*ptr = regmap;
++		devres_add(dev, ptr);
++	} else {
++		devres_free(ptr);
++	}
++
++	return regmap;
++}
++
++#define __my_regmap_lockdep_wrapper(fn, name, ...) fn(__VA_ARGS__, NULL, NULL)
++
++#define my_devm_regmap_init(dev, bus, bus_context, config)			\
++	__my_regmap_lockdep_wrapper(__my_devm_regmap_init, #config,		\
++				dev, bus, bus_context, config)
++
+ static const struct regmap_config mcp251xfd_regmap_crc;
+ 
+ static int
+ mcp251xfd_regmap_nocrc_write(void *context, const void *data, size_t count)
+ {
++	int ret;
+ 	struct spi_device *spi = context;
++	
++	//tid_cs_start(spi);
++	ret = spi_write(spi, data, count);
++	//tid_cs_stop(spi);
+ 
+-	return spi_write(spi, data, count);
++	printk(KERN_NOTICE "wrOK\n");
++
++	return ret;
+ }
+ 
+ static int
++mcp251xfd_regmap_crc_gather_write_my(void *context,
++				    const void *reg, size_t reg_len,
++				    const void *val, size_t val_len)
++					{
++						printk(KERN_NOTICE "gather\n");
++						return 0;
++					}
++
++static int
+ mcp251xfd_regmap_nocrc_gather_write(void *context,
+ 				    const void *reg, size_t reg_len,
+ 				    const void *val, size_t val_len)
+@@ -70,9 +125,37 @@
+ }
+ 
+ static int
++mcp251xfd_regmap_crc_update_bits_my(void *context, unsigned int reg, unsigned int mask, unsigned int val)
++{
++	int ret;
++
++	unsigned int tmp, orig;
++
++	struct spi_device *spi = context;
++	struct mcp251xfd_priv *priv = spi_get_drvdata(spi);
++	struct regmap *map = priv->map_crc;
++	
++	ret = regmap_read(map, reg, &orig);
++	
++	if (ret != 0)
++		return ret;
++
++	mask=mask<<4;
++
++	tmp = orig & ~mask;
++	tmp |= val & mask;
++
++	if(tmp != orig)
++		ret = regmap_write(map, reg, tmp);
++
++	return ret;
++}
++
++static int
+ mcp251xfd_regmap_nocrc_update_bits(void *context, unsigned int reg,
+ 				   unsigned int mask, unsigned int val)
+ {
++	printk(KERN_NOTICE "NOCRC_UPDATE_BITS()\n");
+ 	struct spi_device *spi = context;
+ 	struct mcp251xfd_priv *priv = spi_get_drvdata(spi);
+ 	struct mcp251xfd_map_buf_nocrc *buf_rx = priv->map_buf_nocrc_rx;
+@@ -136,11 +219,12 @@
+ }
+ 
+ static int
+-mcp251xfd_regmap_nocrc_read(void *context,
+-			    const void *reg, size_t reg_len,
++mcp251xfd_regmap_nocrc_read(void *context, const void *reg, size_t reg_len,
+ 			    void *val_buf, size_t val_len)
+ {
+ 	struct spi_device *spi = context;
++	//tid_cs_start(spi);
++	
+ 	struct mcp251xfd_priv *priv = spi_get_drvdata(spi);
+ 	struct mcp251xfd_map_buf_nocrc *buf_rx = priv->map_buf_nocrc_rx;
+ 	struct mcp251xfd_map_buf_nocrc *buf_tx = priv->map_buf_nocrc_tx;
+@@ -182,6 +266,7 @@
+ 	if (!(priv->devtype_data.quirks & MCP251XFD_QUIRK_HALF_DUPLEX))
+ 		memcpy(val_buf, buf_rx->data, val_len);
+ 
++	//tid_cs_stop(spi);
+ 	return 0;
+ }
+ 
+@@ -220,27 +305,33 @@
+ }
+ 
+ static int
+-mcp251xfd_regmap_crc_write(void *context,
+-			   const void *data, size_t count)
++mcp251xfd_regmap_crc_write(void *context, const void *data, size_t count)
+ {
+ 	const size_t data_offset = sizeof(__be16) +
+ 		mcp251xfd_regmap_crc.pad_bits / BITS_PER_BYTE;
+ 
+-	return mcp251xfd_regmap_crc_gather_write(context,
+-						 data, data_offset,
+-						 data + data_offset,
+-						 count - data_offset);
++	return mcp251xfd_regmap_crc_gather_write(context, data, data_offset, data + data_offset, count - data_offset);
++	//return 0;
+ }
+ 
+ static int
+-mcp251xfd_regmap_crc_read_one(struct mcp251xfd_priv *priv,
+-			      struct spi_message *msg, unsigned int data_len)
++mcp251xfd_regmap_crc_read_one(struct mcp251xfd_priv *priv, struct spi_message *msg, unsigned int data_len)
+ {
++	//tid_cs_start(priv->spi);
++	
+ 	const struct mcp251xfd_map_buf_crc *buf_rx = priv->map_buf_crc_rx;
+ 	const struct mcp251xfd_map_buf_crc *buf_tx = priv->map_buf_crc_tx;
+ 	u16 crc_received, crc_calculated;
+ 	int err;
+ 
++	struct dentry *dir = debugfs_create_dir("mcp251xfd", 0);
++	u16 *rx1 = (u16*)&buf_rx->data;
++	debugfs_create_x16("rx1", 0666, dir, rx1);
++	u32 *rx2 = (u32*)&buf_rx->data+2;
++	debugfs_create_x32("rx2", 0666, dir, rx2);
++
++	
++
+ 	BUILD_BUG_ON(sizeof(buf_rx->cmd) != sizeof(__be16) + sizeof(u8));
+ 	BUILD_BUG_ON(sizeof(buf_tx->cmd) != sizeof(__be16) + sizeof(u8));
+ 
+@@ -256,15 +347,16 @@
+ 	if (crc_received != crc_calculated)
+ 		return -EBADMSG;
+ 
++	//tid_cs_stop(priv->spi);
+ 	return 0;
+ }
+ 
+ static int
+-mcp251xfd_regmap_crc_read(void *context,
+-			  const void *reg_p, size_t reg_len,
+-			  void *val_buf, size_t val_len)
++mcp251xfd_regmap_crc_read(void *context, const void *reg_p, size_t reg_len, void *val_buf, size_t val_len)
+ {
+ 	struct spi_device *spi = context;
++	//tid_cs_start(spi);
++	
+ 	struct mcp251xfd_priv *priv = spi_get_drvdata(spi);
+ 	struct mcp251xfd_map_buf_crc *buf_rx = priv->map_buf_crc_rx;
+ 	struct mcp251xfd_map_buf_crc *buf_tx = priv->map_buf_crc_tx;
+@@ -310,6 +402,12 @@
+ 
+ 	for (i = 0; i < MCP251XFD_READ_CRC_RETRIES_MAX; i++) {
+ 		err = mcp251xfd_regmap_crc_read_one(priv, &msg, val_len);
++
++		if(err == -EBADMSG)
++		{
++			printk(KERN_NOTICE "crc problem\n");
++		}
++
+ 		if (!err)
+ 			goto out;
+ 		if (err != -EBADMSG)
+@@ -354,8 +452,23 @@
+ 		return err;
+ 	}
+  out:
+-	memcpy(val_buf, buf_rx->data, val_len);
++	printk(KERN_NOTICE "mem copying %u bytes from rx_buffer data -> val_buf pointer", val_len);
++	memcpy(val_buf, buf_rx->data, val_len); //6
+ 
++	u8 *mp = (u8*)val_buf; int h;
++	for(h=0; h<9; h++)
++	{
++		printk(KERN_NOTICE "%02x ", *mp);
++		mp+=1;
++	}
++	printk(KERN_NOTICE "\n");
++
++	//
++	//*(u32*)val_buf = *(u32*)val_buf>>4;
++	//
++	//tid_cs_stop(spi);
++	//
++	
+ 	return 0;
+ }
+ 
+@@ -394,7 +507,8 @@
+ 	.reg_format_endian_default = REGMAP_ENDIAN_BIG,
+ 	.val_format_endian_default = REGMAP_ENDIAN_LITTLE,
+ 	.max_raw_read = sizeof_field(struct mcp251xfd_map_buf_nocrc, data),
+-	.max_raw_write = sizeof_field(struct mcp251xfd_map_buf_nocrc, data),
++	.max_raw_write = 256,
++	//.max_raw_write = sizeof_field(struct mcp251xfd_map_buf_nocrc, data),
+ };
+ 
+ static const struct regmap_config mcp251xfd_regmap_crc = {
+@@ -412,11 +526,13 @@
+ static const struct regmap_bus mcp251xfd_bus_crc = {
+ 	.write = mcp251xfd_regmap_crc_write,
+ 	.gather_write = mcp251xfd_regmap_crc_gather_write,
++	//.reg_update_bits = mcp251xfd_regmap_crc_update_bits_my,
+ 	.read = mcp251xfd_regmap_crc_read,
+ 	.reg_format_endian_default = REGMAP_ENDIAN_NATIVE,
+ 	.val_format_endian_default = REGMAP_ENDIAN_LITTLE,
+ 	.max_raw_read = sizeof_field(struct mcp251xfd_map_buf_crc, data),
+-	.max_raw_write = sizeof_field(struct mcp251xfd_map_buf_crc, data),
++	.max_raw_write = 252,
++	//.max_raw_write = sizeof_field(struct mcp251xfd_map_buf_crc, data),
+ };
+ 
+ static inline bool
+@@ -439,8 +555,14 @@
+ 	if (!priv->map_nocrc) {
+ 		struct regmap *map;
+ 
+-		map = devm_regmap_init(&priv->spi->dev, &mcp251xfd_bus_nocrc,
+-				       priv->spi, &mcp251xfd_regmap_nocrc);
++		map = my_devm_regmap_init(&priv->spi->dev, &mcp251xfd_bus_nocrc, priv->spi, &mcp251xfd_regmap_nocrc);
++		
++		//
++		//		
++		//map = devm_regmap_init_spi(priv->spi, &mcp251xfd_regmap_nocrc);
++		//
++		//
++		
+ 		if (IS_ERR(map))
+ 			return PTR_ERR(map);
+ 
+@@ -492,8 +614,14 @@
+ 	if (!priv->map_crc) {
+ 		struct regmap *map;
+ 
+-		map = devm_regmap_init(&priv->spi->dev, &mcp251xfd_bus_crc,
+-				       priv->spi, &mcp251xfd_regmap_crc);
++		map = my_devm_regmap_init(&priv->spi->dev, &mcp251xfd_bus_crc, priv->spi, &mcp251xfd_regmap_crc);
++		
++		//
++		//		
++		//map = devm_regmap_init_spi(priv->spi, &mcp251xfd_regmap_crc);
++		//
++		//
++		
+ 		if (IS_ERR(map))
+ 			return PTR_ERR(map);
+ 
